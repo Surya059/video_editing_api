@@ -23,7 +23,8 @@ export const VideoControls: React.FC<VideoControlsProps> = ({
   const formatTime = (time: number) => {
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    const milliseconds = Math.floor((time % 1) * 1000);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
   };
 
   return (
@@ -35,7 +36,7 @@ export const VideoControls: React.FC<VideoControlsProps> = ({
             className="relative flex items-center select-none touch-none w-full h-5"
             value={[currentTime]}
             max={duration}
-            step={0.1}
+            step={0.001}
             onValueChange={([value]) => onTimeChange(value)}
           >
             <Slider.Track className="bg-gray-200 relative grow rounded-full h-2">
@@ -62,7 +63,7 @@ export const VideoControls: React.FC<VideoControlsProps> = ({
               className="relative flex items-center select-none touch-none w-full h-5"
               value={[startTime]}
               max={endTime}
-              step={0.1}
+              step={0.001}
               onValueChange={([value]) => onStartTimeChange(value)}
             >
               <Slider.Track className="bg-gray-200 relative grow rounded-full h-2">
@@ -83,7 +84,7 @@ export const VideoControls: React.FC<VideoControlsProps> = ({
               value={[endTime]}
               min={startTime}
               max={duration}
-              step={0.1}
+              step={0.001}
               onValueChange={([value]) => onEndTimeChange(value)}
             >
               <Slider.Track className="bg-gray-200 relative grow rounded-full h-2">

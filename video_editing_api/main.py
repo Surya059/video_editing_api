@@ -1,5 +1,6 @@
 import os
 import uuid
+import logging
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends, Form
 from fastapi.responses import RedirectResponse, FileResponse
@@ -11,6 +12,10 @@ from video_editing_api.video_processor import OperationFactory, BaseOperation
 from video_editing_api.database import get_db, Video, ProcessedVideo
 from video_editing_api.s3_service import S3Service
 
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 app = FastAPI(
     title="Video Editing API",
     description="API for video editing operations",
@@ -20,17 +25,11 @@ app = FastAPI(
 # Add CORS middleware with specific origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://172.31.3.75:3000",
-        "http://172.31.3.75:3001",
-        "http://172.31.3.75:3002",
-    ],
+    allow_origins=["*"],  # Allow all origins in development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"]  # Allow frontend to see the filename
 )
 
 # Initialize S3 service
@@ -276,47 +275,98 @@ async def trim_video(
     endTime: str = Form(...)
 ):
     """
-    Trim a video file directly without storing it.
+    Trim a video file directly without storing it in the database.
     Returns the trimmed video file.
     """
+    temp_input_path = None
+    temp_output_path = None
+    
     try:
+        logger.info(f"Received trim request - File: {video.filename}, Start: {startTime}, End: {endTime}")
+        
         # Create temporary directory if it doesn't exist
-        os.makedirs("uploads", exist_ok=True)
-        os.makedirs("processed", exist_ok=True)
+        os.makedirs("/tmp", exist_ok=True)
 
         # Save uploaded file temporarily
-        temp_input_path = f"uploads/{video.filename}"
+        temp_input_path = f"/tmp/input_{uuid.uuid4().hex}_{video.filename}"
+        logger.debug(f"Saving uploaded file to: {temp_input_path}")
         with open(temp_input_path, "wb") as f:
             content = await video.read()
             f.write(content)
+        logger.debug(f"File saved, size: {os.path.getsize(temp_input_path)} bytes")
+
+        # Get video duration first
+        logger.debug("Getting video info...")
+        video_info = BaseOperation.get_video_info(temp_input_path)
+        logger.info(f"Video info: {video_info}")
+        
+        start_time = float(startTime)
+        end_time = float(endTime)
+        logger.debug(f"Parsed times - Start: {start_time}, End: {end_time}")
+
+        # Validate times
+        if start_time >= video_info["duration"]:
+            msg = f"Start time ({start_time}s) must be less than video duration ({video_info['duration']:.2f}s)"
+            logger.error(msg)
+            raise HTTPException(status_code=400, detail=msg)
+        if end_time > video_info["duration"]:
+            msg = f"End time ({end_time}s) must be less than or equal to video duration ({video_info['duration']:.2f}s)"
+            logger.error(msg)
+            raise HTTPException(status_code=400, detail=msg)
+        if start_time >= end_time:
+            msg = f"Start time ({start_time}s) must be less than end time ({end_time}s)"
+            logger.error(msg)
+            raise HTTPException(status_code=400, detail=msg)
 
         # Create cut operation
+        logger.debug("Creating cut operation...")
         operation = OperationFactory.create_operation(
             "cut",
             temp_input_path,
-            start_time=float(startTime),
-            end_time=float(endTime)
+            start_time=start_time,
+            end_time=end_time
         )
 
         # Process video
-        output_path = operation.process()
+        logger.debug("Processing video...")
+        temp_output_path = operation.process()
+        logger.info(f"Video processed successfully, output at: {temp_output_path}")
 
         # Return the processed video file
-        return FileResponse(
-            output_path,
+        logger.debug("Returning processed video...")
+        response = FileResponse(
+            temp_output_path,
             media_type="video/mp4",
-            filename=f"trimmed_{video.filename}"
+            filename=f"trimmed_{video.filename}",
+            background=BackgroundTasks()
         )
+        
+        # Add cleanup of files as a background task
+        response.background.add_task(cleanup_files, temp_input_path, temp_output_path)
+        return response
 
+    except HTTPException as he:
+        logger.error(f"HTTP Exception: {str(he)}")
+        # Clean up
+        cleanup_files(temp_input_path, temp_output_path)
+        raise he
+    except ValueError as ve:
+        logger.error(f"Value Error: {str(ve)}")
+        # Clean up
+        cleanup_files(temp_input_path, temp_output_path)
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        # Clean up
+        cleanup_files(temp_input_path, temp_output_path)
         raise HTTPException(status_code=500, detail=str(e))
 
-    finally:
-        # Clean up temporary files
-        if os.path.exists(temp_input_path):
-            os.remove(temp_input_path)
-        if os.path.exists(output_path):
-            os.remove(output_path)
+def cleanup_files(input_path, output_path):
+    """Helper function to clean up temporary files"""
+    if input_path and os.path.exists(input_path):
+        os.remove(input_path)
+    if output_path and os.path.exists(output_path):
+        os.remove(output_path)
 
 @app.get("/")
 async def root():
@@ -327,4 +377,4 @@ async def root():
         "name": "Video Editing API",
         "version": "1.0.0",
         "documentation": "/docs"
-    } 
+    }

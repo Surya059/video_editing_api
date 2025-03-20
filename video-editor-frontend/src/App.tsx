@@ -10,12 +10,14 @@ export const App: React.FC = () => {
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const handleVideoSelect = (file: File) => {
     setSelectedFile(file);
     setCurrentTime(0);
     setStartTime(0);
+    setError(null);
     
     // Create a temporary video element to get the duration
     const video = document.createElement('video');
@@ -29,6 +31,7 @@ export const App: React.FC = () => {
 
   const handleExport = async () => {
     if (!selectedFile) return;
+    setError(null);
 
     try {
       const blob = await videoService.trimVideo(selectedFile, startTime, endTime);
@@ -40,9 +43,9 @@ export const App: React.FC = () => {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error processing video:', error);
-      alert('Failed to process video. Please try again.');
+      setError(error.message || 'Failed to process video. Please try again.');
     }
   };
 
@@ -56,6 +59,12 @@ export const App: React.FC = () => {
 
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+              <p className="text-red-700">{error}</p>
+            </div>
+          )}
+
           {!selectedFile ? (
             <VideoUploader onVideoSelect={handleVideoSelect} />
           ) : (

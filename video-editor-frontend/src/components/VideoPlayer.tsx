@@ -30,7 +30,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ file, currentTime, onT
   }, [file]);
 
   useEffect(() => {
-    if (videoRef.current && Math.abs(videoRef.current.currentTime - currentTime) > 0.1) {
+    if (videoRef.current && Math.abs(videoRef.current.currentTime - currentTime) > 0.001) {
       videoRef.current.currentTime = currentTime;
     }
   }, [currentTime]);
