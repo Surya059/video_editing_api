@@ -1,8 +1,8 @@
 import os
 import uuid
 from typing import Optional
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends, Form
+from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -17,10 +17,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add CORS middleware
+# Add CORS middleware with specific origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
+        "http://172.31.3.75:3000",
+        "http://172.31.3.75:3001",
+        "http://172.31.3.75:3002",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -261,6 +268,55 @@ async def get_video_info(video_id: str, db: Session = Depends(get_db)):
         "operation_type": getattr(video_data, "operation_type", None),
         "operation_params": getattr(video_data, "operation_params", None)
     }
+
+@app.post("/api/trim-video")
+async def trim_video(
+    video: UploadFile = File(...),
+    startTime: str = Form(...),
+    endTime: str = Form(...)
+):
+    """
+    Trim a video file directly without storing it.
+    Returns the trimmed video file.
+    """
+    try:
+        # Create temporary directory if it doesn't exist
+        os.makedirs("uploads", exist_ok=True)
+        os.makedirs("processed", exist_ok=True)
+
+        # Save uploaded file temporarily
+        temp_input_path = f"uploads/{video.filename}"
+        with open(temp_input_path, "wb") as f:
+            content = await video.read()
+            f.write(content)
+
+        # Create cut operation
+        operation = OperationFactory.create_operation(
+            "cut",
+            temp_input_path,
+            start_time=float(startTime),
+            end_time=float(endTime)
+        )
+
+        # Process video
+        output_path = operation.process()
+
+        # Return the processed video file
+        return FileResponse(
+            output_path,
+            media_type="video/mp4",
+            filename=f"trimmed_{video.filename}"
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        # Clean up temporary files
+        if os.path.exists(temp_input_path):
+            os.remove(temp_input_path)
+        if os.path.exists(output_path):
+            os.remove(output_path)
 
 @app.get("/")
 async def root():
